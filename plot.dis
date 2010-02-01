@@ -1,0 +1,22 @@
+set terminal postscript enhanced color
+set output "graphs.ps"
+set style data linespoints
+set y2tics
+set xlabel "Record size [B]"
+set ylabel "Duration [s]"
+set y2label "Throughput [MB/s]"
+set ytics nomirror
+set xtics nomirror
+set title "Average duration of discard operations and Throughput in MB/s\n\
+depending on record size"
+plot "output.dat" using 1:5 title "Average duration", \
+"output.dat" using 1:7 axes x1y2 title "Throughput"
+set title "Summary of duration of discard operations and Throughput in MB/s\n\
+depending on record size"
+plot "output.dat" using 1:6 title "Duration Summary", \
+"output.dat" using 1:7 axes x1y2 title "Throughput"
+set title "Minimal and maximal durations depending on record size"
+unset y2tics
+unset y2label
+plot "output.dat" using 1:4 title "Max", \
+"output.dat" using 1:3 title "Min"
