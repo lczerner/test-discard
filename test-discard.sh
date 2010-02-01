@@ -7,8 +7,6 @@ BINARY=$(basename $0 .sh)
 DIRNAME=$(dirname "$(pwd)/$0")
 DATAFILE=${DIRNAME}/output.dat
 PLOTSCRIPT=${DIRNAME}/plot.dis
-GNUPLOT=$(which gnuplot)
-PS2PDF=$(which ps2pdf)
 declare pid
 
 do_exit() {
@@ -26,7 +24,7 @@ do_exit() {
 
 trap do_exit INT TERM
 
-$DIRNAME/$BINARY $@ | tee $DATAFILE &
+$DIRNAME/$BINARY $@ -t 100m -R 4k:512k:4k -b | tee $DATAFILE &
 pid=$!
 
 wait $pid
@@ -35,21 +33,23 @@ retval=$?
 if [ $retval == 0 ]; then
 
 	echo "Returning success retval... (retval=$retval)"
-	if [ ! -f $GNUPLOT ]; then
+	GNUPLOT=$(which gnuplot 2> /dev/null)
+	if [ $? != 0 ]; then
 		echo "Gnuplot not found. Graphs will not be generated."
 		exit 0
 	fi
-
 	echo "Generating graphs..."
 	$GNUPLOT $PLOTSCRIPT
-	if [ ! -f $PS2PDF ]; then
+
+	PS2PDF=$(which ps2pdf)
+	if [ $? != 0 ]; then
 		echo "ps2pdf not found. Pdf file will not be generated,"
-		echo "Graphs are saved in the file graphs.ps"
+		echo "Graphs are saved in the file ${DIRNAME}/graphs.ps"
 		exit 0
 	fi
-
 	$PS2PDF graphs.ps graphs.pdf
-	echo "Graphs are saved in the file graphs.pdf"
+	echo "Graphs are saved in the file ${DIRNAME}/graphs.pdf"
+
 	exit 0
 else
 	echo "Returning error retval... (retval=$retval)"

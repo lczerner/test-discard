@@ -9,4 +9,4 @@ $(PROGRAM): $(SRC)
 	$(CC) $(CFLAGS) $(SRC) -o $@
 
 clean:
-	rm -rf *.o test-discard
+	rm -rf *.o test-discard *.dat *.ps *.pdf

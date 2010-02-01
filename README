@@ -1,0 +1,103 @@
+#(C)2009 Red Hat, Inc., Lukas Czerner <lczerner@redhat.com>
+#######################################################################
+
+This is a simple tool for testing linux discard ability. You can specify
+amount of total data which will be discarded, starting point where
+discarding begin and record size which will be repetitively discarded
+until total amount of data is discarded. Also you must specify device
+which should be tested. There is no need to write any data to the device
+before you invoke the test. Before each test, desired amount of data is
+written to the device on the desired place.
+
+There is also support for automated testing of range of record sizes.
+You just need to specify starting, ending and step record size and the
+tool will automatically survey the whole range. In addition you can get
+more script-friendly output for using this tool in scripts.
+
+There is script file "test-discard.sh" which you can invoke whit just
+one parameter [-d]. It is intended to be an easy way to run the test. It
+also generates nice graphs from the output, but you must have gnuplot
+installed.
+
+#Function Principle
+#######################################################################
+Invoke ioctl with BLKDISCARD flag and defined range repetitively as the
+specified amount of is discarded. Running time of each ioctl invocation
+is measured and stored (also min and max) as well as number of 
+invocations,range size. From this data we can compute average ioctl
+running time, overall ioctl sunning time (sum) and throughput.
+
+
+#usage: 
+#######################################################################
+<program> [-h] [-b] [-s start] [-r record_size] [-t total_size] 
+[-d device] [-R start:end:step]
+	
+-s num Starting point of the discard
+-r num Size of the record discarded in one step
+-R start:end:step Define record range to be tested
+-t num Total amount of discarded data
+-d dev Device which should be tested
+-b     Output will be optimized for scripts
+	
+ <record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>
+
+-h     Print this help
+
+\"num\" can be specified either as a ordinary number, or as a
+number followed by the unit. Supported units are
+	k|K - kilobytes (n*1024)
+	m|M - megabytes (n*1024*1024)
+	g|G - gigabytes (n*1024*1024*1024)
+
+#Files:
+#######################################################################
+Makefile			# makefile
+test-discard.c		# source codes
+test-discard.sh		# run this script to start testing immediatelly, it 
+					  also generates a graphs
+plot.dis			# batch file for the gnuplot
+README				# this readme
+
+#Examples:
+#######################################################################
+./test-discard -s 10k -r 4k -t 10M -d /dev/sdb1
+start : 10240
+record_size : 4096
+total_size : 10485760
+device : /dev/sdb1
+
+./test-discard -t 100m -R 4k:64k:4k -d /dev/sdb1
+start : 0
+record_size from 4096 to 65536 with the step 4096 is tested.
+total size : 104857600
+device : /dev/sdb1
+
+./test-discard -t 100m -R 4k:512k:4k -d /dev/sdb1 -b
+This is the same as above but output will be more script friendly.
+Output will be like:
+
+4096 10485760 0.000054 0.143009 0.089510 229.145599 0.043640
+8192 10485760 0.000060 0.155563 0.086155 110.278017 0.090680
+12288 10485760 0.088581 0.179759 0.099331 84.828429 0.117885
+16384 10485760 0.077438 0.177407 0.092211 59.015074 0.169448
+20480 10485760 0.076724 0.142325 0.087052 44.570576 0.224363
+...
+...etc
+
+See the help for meaning of those particular columns.
+
+You can create graphs from this output directly, but you must have
+gnuplot installed. Make sure that you have saved output to the file
+named "output.dat". Then you can simple invoke:
+	
+	gnuplot plot.dis
+	ps2pdf graphs.ps graphs.pdf
+
+The easiest way to run the test is :
+
+	./test-discard.sh -d /dev/sdb1
+
+The script will handle the rest, even creates graphs. The testing
+options in this case are identical to the example above.
+
