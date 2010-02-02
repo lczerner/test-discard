@@ -423,6 +423,10 @@ int test_step(struct definitions *defs) {
 	if (prepare_device(defs) == -1) {
 		return -1;
 	}
+	
+	if (defs->output == HUMAN) {
+		fprintf(stdout,"[+] Testing\n");
+	}
 
 	/* start timer */
 	if (gettimeofday(&tv_start, (struct timezone *) NULL) == -1) {
@@ -538,6 +542,7 @@ int main (int argc, char **argv) {
 		repeat = 1;
 	} else {
 		repeat = ((rec.end - rec.start) / rec.step) + 1;
+		defs.record_size = rec.start;
 	}
 
 	err = 0;
