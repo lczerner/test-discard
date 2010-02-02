@@ -186,8 +186,6 @@ int run_ioctl(
 			perror("Ioctl BLKDISCARD");
 			return 1;
 		}
-		/*fprintf(stderr,"Calling record DISCARD from %llu to %llu\n",
-			next_start,next_hop);*/
 
 		if (gettimeofday(&tv_stop, (struct timezone *) NULL) == -1) {
 			perror("gettimeofday");
@@ -538,6 +536,10 @@ int main (int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
+	if ((dev_size = get_device_size(defs.fd)) == 0) {
+		return EXIT_FAILURE;
+	}
+
 	if (rec.step == 0) {
 		repeat = 1;
 	} else {
@@ -549,9 +551,6 @@ int main (int argc, char **argv) {
 	for (unsigned long long i = 1;i <= repeat;i++) {
 
 		/* check boundaries */
-		if ((dev_size =get_device_size(defs.fd)) == 0) {
-			return EXIT_FAILURE;
-		}
 		if ((defs.start + defs.total_size) > dev_size) {
 			fprintf(stderr,"Boundaries does not fit in the device\n");
 			return EXIT_FAILURE;
