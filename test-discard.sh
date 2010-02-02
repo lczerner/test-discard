@@ -24,7 +24,7 @@ do_exit() {
 
 trap do_exit INT TERM
 
-$DIRNAME/$BINARY $@ -t 100m -R 4k:512k:4k -b | tee $DATAFILE &
+$DIRNAME/$BINARY $@ -t 50m -R 4k:1024k:4k -b | tee $DATAFILE &
 pid=$!
 
 wait $pid
