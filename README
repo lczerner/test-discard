@@ -33,7 +33,7 @@ running time, overall ioctl sunning time (sum) and throughput.
 # usage: 
 
 <program> [-h] [-b] [-s start] [-r record_size] [-t total_size] 
-[-d device] [-R start:end:step]
+[-d device] [-R start:end:step] [-z]
 	
 -s num Starting point of the discard
 -r num Size of the record discarded in one step
@@ -44,6 +44,7 @@ running time, overall ioctl sunning time (sum) and throughput.
 	
  <record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>
 
+-z     Discard already discarded blocks
 -h     Print this help
 
 \"num\" can be specified either as a ordinary number, or as a

@@ -10,7 +10,7 @@
  *
  * usage: 
  *	<program> [-h] [-b] [-s start] [-r record_size] [-t total_size] 
- *	[-d device] [-R start:end:step]
+ *	[-d device] [-R start:end:step] [-z]
  *		
  *	-s num Starting point of the discard
  *	-r num Size of the record discarded in one step
@@ -21,6 +21,7 @@
  *		
  *	 <record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>
  *
+ *	-z     Discard already discarded blocks
  *	-h     Print this help
  *
  *	\"num\" can be specified either as a ordinary number, or as a
@@ -71,10 +72,15 @@
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
 
-#define ENT_SIZE 1024
+#define ENT_SIZE 4096				/* size of entropy */
 
-#define BATCH	0
-#define HUMAN	1
+#define BATCHOUT	1				/* batch output */
+#define DISCARD2	2				/* discard already discarded */
+#define RANDOMIO	4				/* random IO pattern */
+
+#define IF_HUMAN(x)			(~x & BATCHOUT)
+#define IF_DISCARD2(x)		(x & DISCARD2)
+#define IF_RANDOMIO(x)		(x & RANDOMIO)
 
 int stop;
 
@@ -97,9 +103,10 @@ struct definitions {
 	unsigned long long start;
 	unsigned long long record_size;
 	unsigned long long total_size;
+	unsigned long dev_size;
 	char target[PATH_MAX];
 	int fd;
-	char output;
+	int flags;
 };
 
 
@@ -117,7 +124,8 @@ struct records {
  * Print program usage
  */
 void usage(char *program) {
-	fprintf(stdout, "%s [-h] [-b] [-s start] [-r record_size] [-t total_size] [-d device] [-R start:end:step]\n\n\
+	fprintf(stdout, "%s [-h] [-b] [-s start] [-r record_size] [-t total_size] [-d device] [-R start:end:step] \
+	[-z]\n\n\
 	-s num Starting point of the discard\n\
 	-r num Size of the record discarded in one step\n\
 	-R start:end:step Define record range to be tested\n\
@@ -125,6 +133,7 @@ void usage(char *program) {
 	-d dev Device which should be tested\n\
 	-b     Output will be optimized for scripts\n\
 	<record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>\n\
+	-z     Discard already discarded blocks\n\
 	-h     Print this help\n\n\
 	\"num\" can be specified either as a ordinary number, or as a\n\
 	number followed by the unit. Supported units are\n\n\
@@ -179,13 +188,14 @@ int run_ioctl(
 			perror("gettimeofday");
 			return 1;
 		}
-
 		range[0] = next_start;
 		range[1] = next_hop;
+/*
 		if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 			perror("Ioctl BLKDISCARD");
 			return 1;
-		}
+		}*/
+		fprintf(stdout,"Invoking BLKDISCARD from %llu to %llu\n",next_start, next_hop);
 
 		if (gettimeofday(&tv_stop, (struct timezone *) NULL) == -1) {
 			perror("gettimeofday");
@@ -373,7 +383,7 @@ void print_results(
 	struct statistics *stats
 	)
 {
-	if (defs->output == HUMAN) {
+	if (IF_HUMAN(defs->flags)) {
 
 		/* Print results */
 		fprintf(stdout,"\n[+] RESULTS\nmin = %lfs\nmax = %lfs\navg = %lfs\n",
@@ -415,14 +425,16 @@ int test_step(struct definitions *defs) {
 	stats.sum = 0;
 	stats.count = 0;
 
-	if (defs->output == HUMAN) {
-		fprintf(stdout,"[+] Preparing device\n");
+	if (!IF_DISCARD2(defs->flags)) {
+		if (IF_HUMAN(defs->flags)) {
+			fprintf(stdout,"[+] Preparing device\n");
+		}
+		if (prepare_device(defs) == -1) {
+			return -1;
+		}
 	}
-	if (prepare_device(defs) == -1) {
-		return -1;
-	}
-	
-	if (defs->output == HUMAN) {
+
+	if (IF_HUMAN(defs->flags)) {
 		fprintf(stdout,"[+] Testing\n");
 	}
 
@@ -458,20 +470,43 @@ int test_step(struct definitions *defs) {
 } /* test_step */
 
 
+/**
+ * Discard part of the device or whole device if the
+ * randomio flag is set
+ */
+int discard_device(struct definitions *defs) {
+	unsigned long long range[2];
+
+	if (IF_RANDOMIO(defs->flags)) {
+		range[0] = 0;
+		range[1] = defs->dev_size;
+	} else {
+		range[0] = defs->start;
+		range[1] = defs->start + defs->total_size;
+	}
+
+	if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
+		perror("Ioctl BLKDISCARD");
+		return -1;
+	}
+
+	return 0;
+} /* discard_device */
+
 int main (int argc, char **argv) {
 	int c, err;
 	struct stat sb;
 	struct definitions defs;
 	struct records rec;
-	unsigned long long dev_size, repeat;
+	unsigned long long repeat;
 
 	defs.record_size = DEF_REC_SIZE;
 	defs.total_size = DEF_TOT_SIZE;
 	defs.start = 0;
-	defs.output = HUMAN;
+	defs.flags = 0;
 	rec.step = 0;
 
-	while ((c = getopt(argc, argv, "hbs:r:t:d:R:")) != EOF) {
+	while ((c = getopt(argc, argv, "hzbs:r:t:d:R:")) != EOF) {
 		switch (c) {
 			case 's': /* starting point */
 				if ((defs.start = get_number(&optarg)) == 0) {
@@ -505,7 +540,10 @@ int main (int argc, char **argv) {
 				return EXIT_SUCCESS;
 				break;
 			case 'b':
-				defs.output = BATCH;
+				defs.flags |= BATCHOUT;
+				break;
+			case 'z':
+				defs.flags |= DISCARD2;
 				break;
 			default:
 				usage(argv[0]);
@@ -536,8 +574,19 @@ int main (int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	if ((dev_size = get_device_size(defs.fd)) == 0) {
+	if ((defs.dev_size = get_device_size(defs.fd)) == 0) {
 		return EXIT_FAILURE;
+	}
+
+	if (IF_DISCARD2(defs.flags)) {
+
+		if (IF_HUMAN(defs.flags)) {
+			fprintf(stdout,"[+] Discarding device");
+		}
+
+		if (discard_device(&defs) == -1) {
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (rec.step == 0) {
@@ -551,12 +600,12 @@ int main (int argc, char **argv) {
 	for (unsigned long long i = 1;i <= repeat;i++) {
 
 		/* check boundaries */
-		if ((defs.start + defs.total_size) > dev_size) {
+		if ((defs.start + defs.total_size) > defs.dev_size) {
 			fprintf(stderr,"Boundaries does not fit in the device\n");
 			return EXIT_FAILURE;
 		}
 		
-		if (defs.output == HUMAN) {
+		if (IF_HUMAN(defs.flags)) {
 			fprintf(stdout,"\n[+] Running test\n");
 			fprintf(stdout,"Start: %llu\nRecord size: %llu\nTotal size: %llu\n\n",
 				defs.start,defs.record_size,defs.total_size);
