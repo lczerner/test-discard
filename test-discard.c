@@ -68,6 +68,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
@@ -120,6 +121,22 @@ struct records {
 };
 
 
+typedef struct discarded_list DISCARDED_LIST;
+
+/**
+ * Structure for creating list of discarded 
+ * records
+ */
+struct discarded_list {
+	unsigned long long start;
+	unsigned long long end;
+	DISCARDED_LIST *list_next;
+};
+
+DISCARDED_LIST *discarded_head = NULL;
+DISCARDED_LIST *discarded_tail = NULL;
+
+
 /**
  * Print program usage
  */
@@ -148,6 +165,77 @@ void usage(char *program) {
 	device : /dev/sdb1\n",program);
 } /* usage */
 
+long int
+get_random_block(struct definitions *defs) 
+{
+	unsigned long long max;
+
+	max = defs->dev_size / defs->record_size;
+	if (max > RAND_MAX) {
+		fprintf(stderr,"Warning: I can not use whole disc.\n");
+		max = RAND_MAX;
+	}
+
+	return (random() % max);
+}
+
+
+int get_random_range(
+	struct definitions *defs, 
+	unsigned long long *range) 
+{
+	long int block;
+	DISCARDED_LIST *newitem;
+	DISCARDED_LIST *item;
+
+	block = get_random_block(defs);
+
+	item = discarded_head;
+
+	while (item) {
+
+		if ((block >= item->start) && (block <= item->end)) {
+
+			block = item->end;
+
+			if ((item->end++) == item->list_next->start) {
+				item->end = item->list_next->end;
+			}
+			item = discarded_head;
+			break;
+		}
+
+		if (block < item->end) {
+			break;
+		}
+	}
+	
+	if (item == NULL) {
+		/* add to the tail */
+	}
+
+	if (item == discarded_head) {
+		/* finished */
+	} else {
+		/* create new item after *item* */
+
+		if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
+			/* CHANGE THIS - it is just temporary */
+			fprintf(stderr,"malloc error\n");
+			return -1;
+		}	
+
+		newitem->start = block;
+		newitem->end = (block + 1);
+
+		if (item == NULL) {
+		}
+
+	}
+
+	
+	return 0;
+}
 
 /**
  * Discards defined amount of data on the device by issuing ioctl with defined 
@@ -190,12 +278,11 @@ int run_ioctl(
 		}
 		range[0] = next_start;
 		range[1] = next_hop;
-/*
+
 		if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 			perror("Ioctl BLKDISCARD");
 			return 1;
-		}*/
-		fprintf(stdout,"Invoking BLKDISCARD from %llu to %llu\n",next_start, next_hop);
+		}
 
 		if (gettimeofday(&tv_stop, (struct timezone *) NULL) == -1) {
 			perror("gettimeofday");
@@ -506,6 +593,8 @@ int main (int argc, char **argv) {
 	defs.flags = 0;
 	rec.step = 0;
 
+	srandom((unsigned) time(NULL));
+
 	while ((c = getopt(argc, argv, "hzbs:r:t:d:R:")) != EOF) {
 		switch (c) {
 			case 's': /* starting point */
@@ -567,7 +656,7 @@ int main (int argc, char **argv) {
 		fprintf(stderr,"%s is not a valid device\n", defs.target);
 		return EXIT_FAILURE;
 	}
-
+	
 	/* open device */
 	if ((defs.fd = open(defs.target, O_RDWR)) == -1) {
 		perror("Opening block device");
