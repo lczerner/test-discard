@@ -22,6 +22,7 @@
  *	 <record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>
  *
  *	-z     Discard already discarded blocks
+ *	-x     Run test witch random IO pattern [-s] will be ignored
  *	-h     Print this help
  *
  *	\"num\" can be specified either as a ordinary number, or as a
@@ -69,6 +70,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <assert.h>
 
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
@@ -79,9 +81,9 @@
 #define DISCARD2	2				/* discard already discarded */
 #define RANDOMIO	4				/* random IO pattern */
 
-#define IF_HUMAN(x)			(~x & BATCHOUT)
-#define IF_DISCARD2(x)		(x & DISCARD2)
-#define IF_RANDOMIO(x)		(x & RANDOMIO)
+#define IS_HUMAN(x)			(~x & BATCHOUT)
+#define IS_DISCARD2(x)		(x & DISCARD2)
+#define IS_RANDOMIO(x)		(x & RANDOMIO)
 
 int stop;
 
@@ -104,7 +106,7 @@ struct definitions {
 	unsigned long long start;
 	unsigned long long record_size;
 	unsigned long long total_size;
-	unsigned long dev_size;
+	unsigned long long dev_size;
 	char target[PATH_MAX];
 	int fd;
 	int flags;
@@ -134,7 +136,36 @@ struct discarded_list {
 };
 
 DISCARDED_LIST *discarded_head = NULL;
-DISCARDED_LIST *discarded_tail = NULL;
+
+
+/**
+ * Free the list 
+ */
+void free_list(void) {
+	DISCARDED_LIST *item = NULL;
+	DISCARDED_LIST *nextitem = NULL;
+
+	item = discarded_head;
+
+	while (item) {
+		nextitem = item->list_next;
+		free(item);
+		item = nextitem;
+	}
+	
+	discarded_head = NULL;
+
+} /* free_list */
+
+
+/**
+ * Print critical error message, free list and exit
+ */
+void crit_err(void) {
+	fprintf(stderr,"Critical failure: You found a BUG!\n");
+	free_list();
+	exit(EXIT_FAILURE);
+} /* crit_err */
 
 
 /**
@@ -142,7 +173,7 @@ DISCARDED_LIST *discarded_tail = NULL;
  */
 void usage(char *program) {
 	fprintf(stdout, "%s [-h] [-b] [-s start] [-r record_size] [-t total_size] [-d device] [-R start:end:step] \
-	[-z]\n\n\
+	[-z] [-x]\n\n\
 	-s num Starting point of the discard\n\
 	-r num Size of the record discarded in one step\n\
 	-R start:end:step Define record range to be tested\n\
@@ -151,6 +182,7 @@ void usage(char *program) {
 	-b     Output will be optimized for scripts\n\
 	<record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>\n\
 	-z     Discard already discarded blocks\n\
+	-x     Run test witch random IO pattern [-s] will be ignored\n\
 	-h     Print this help\n\n\
 	\"num\" can be specified either as a ordinary number, or as a\n\
 	number followed by the unit. Supported units are\n\n\
@@ -165,6 +197,10 @@ void usage(char *program) {
 	device : /dev/sdb1\n",program);
 } /* usage */
 
+
+/**
+ * Get random block number on the disk
+ */
 long int
 get_random_block(struct definitions *defs) 
 {
@@ -177,65 +213,163 @@ get_random_block(struct definitions *defs)
 	}
 
 	return (random() % max);
-}
+} /* get_random_block */
 
 
-int get_random_range(
-	struct definitions *defs, 
-	unsigned long long *range) 
+/**
+ * Initialize list with first item 
+ */
+int init_list(void) {
+	DISCARDED_LIST *newitem = NULL;
+
+	free_list();
+
+	if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
+		/* CHANGE THIS - it is just temporary */
+		fprintf(stderr,"malloc error\n");
+		return -1;
+	}	
+
+	newitem->start = 0;
+	newitem->end = 0;
+	newitem->list_next = NULL;
+
+	discarded_head = newitem;
+
+	return 0;
+} /* init_list */
+
+
+/**
+ * Merge two items of the list into the one and free
+ * the second one
+ */
+void merge_items(DISCARDED_LIST *item1, DISCARDED_LIST *item2) {
+
+	item1->end = item2->end;
+	item1->list_next = item2->list_next;
+
+	free(item2);
+
+} /* merge_items */
+
+
+/**
+ * Allocate new item and initialize it with block 
+ * values
+ */
+DISCARDED_LIST *alloc_and_init(long int block) {
+	DISCARDED_LIST *newitem = NULL;
+
+	if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
+		perror("malloc");
+		return NULL;
+	}	
+
+	newitem->start = block;
+	newitem->end = (block + 1);
+
+	return newitem;
+} /* alloc_and_init */
+
+
+/**
+ * Guess the next block in three steps :
+ * 1. Get random block
+ * 2. Find random block in the list, possibly extend item
+ *    and update block
+ * 3. If no suitable item was found in the list, create
+ *    new one and add it to the list (and keep list sorted)
+ */
+int guess_next_block(struct definitions *defs) 
 {
 	long int block;
-	DISCARDED_LIST *newitem;
-	DISCARDED_LIST *item;
+	DISCARDED_LIST *newitem = NULL;
+	DISCARDED_LIST *previtem = NULL;
+	DISCARDED_LIST *item = NULL;
+
+	if (discarded_head == NULL) {
+		crit_err();
+	}
 
 	block = get_random_block(defs);
-
 	item = discarded_head;
 
 	while (item) {
 
+		if (block < item->start) {
+			break;
+		}
+
 		if ((block >= item->start) && (block <= item->end)) {
 
-			block = item->end;
-
-			if ((item->end++) == item->list_next->start) {
-				item->end = item->list_next->end;
+			if ((item->end) >= ((defs->dev_size / defs->record_size))) {
+				block = 0;
+				item = discarded_head;
+				continue;
 			}
+
+			block = item->end;
+			item->end++;
+
+			if (item->list_next) {
+				if (item->end >= item->list_next->start) {
+					merge_items(item,item->list_next);
+				}
+			}
+
 			item = discarded_head;
 			break;
 		}
 
-		if (block < item->end) {
-			break;
-		}
+		previtem = item;
+		item = item->list_next;
 	}
 	
-	if (item == NULL) {
-		/* add to the tail */
-	}
-
-	if (item == discarded_head) {
-		/* finished */
-	} else {
-		/* create new item after *item* */
-
-		if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
-			/* CHANGE THIS - it is just temporary */
-			fprintf(stderr,"malloc error\n");
+	if (item != discarded_head) {
+		if ((newitem = alloc_and_init(block)) == NULL) {
 			return -1;
-		}	
-
-		newitem->start = block;
-		newitem->end = (block + 1);
+		}
 
 		if (item == NULL) {
-		}
+			newitem->list_next = NULL;
 
+		} else {
+
+			if (newitem->end >= item->start) {
+				merge_items(newitem,item);
+			} else {
+				newitem->list_next = item;
+			}
+		}
+		previtem->list_next = newitem;
 	}
 
-	
+	return block;
+} /* get_random_range */
+
+
+/**
+ * Print whole list - ONLY FOR DEBUGGING
+ */
+int print_list() {
+	DISCARDED_LIST *item = NULL;
+	unsigned long long sum = 0;
+
+	item = discarded_head;
+
+	while (item) {
+		fprintf(stdout,"%llu - %llu\n",item->start, item->end);
+		fprintf(stdout,"GREP %llu\n",item->end - item->start);
+		sum += ((item->end - item->start) + 1);
+		item = item->list_next;
+	}
+
+	fprintf(stdout,"SUM: %llu\n",sum);
+
 	return 0;
-}
+} 
+
 
 /**
  * Discards defined amount of data on the device by issuing ioctl with defined 
@@ -248,6 +382,7 @@ int run_ioctl(
 	unsigned long long next_hop, next_start;
 	double time;
 	struct timeval tv_start, tv_stop;
+	long int block;
 	unsigned long long range[2];
 
 	/* Sanity check */
@@ -272,12 +407,27 @@ int run_ioctl(
 			stop = 1;
 		}
 
+		if (IS_RANDOMIO(defs->flags)) {
+			
+			if ((block = guess_next_block(defs)) == -1) {
+				return 1;
+			}
+
+			range[0] = block * defs->record_size;
+			range[1] = range[0] + defs->record_size;
+
+			if (range[1] > defs->dev_size) {
+				range[1] = defs->dev_size;
+			}
+		} else {
+			range[0] = next_start;
+			range[1] = next_hop;
+		}
+
 		if (gettimeofday(&tv_start, (struct timezone *) NULL) == -1) {
 			perror("gettimeofday");
 			return 1;
 		}
-		range[0] = next_start;
-		range[1] = next_hop;
 
 		if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 			perror("Ioctl BLKDISCARD");
@@ -470,7 +620,7 @@ void print_results(
 	struct statistics *stats
 	)
 {
-	if (IF_HUMAN(defs->flags)) {
+	if (IS_HUMAN(defs->flags)) {
 
 		/* Print results */
 		fprintf(stdout,"\n[+] RESULTS\nmin = %lfs\nmax = %lfs\navg = %lfs\n",
@@ -512,8 +662,8 @@ int test_step(struct definitions *defs) {
 	stats.sum = 0;
 	stats.count = 0;
 
-	if (!IF_DISCARD2(defs->flags)) {
-		if (IF_HUMAN(defs->flags)) {
+	if (!IS_DISCARD2(defs->flags)) {
+		if (IS_HUMAN(defs->flags)) {
 			fprintf(stdout,"[+] Preparing device\n");
 		}
 		if (prepare_device(defs) == -1) {
@@ -521,7 +671,7 @@ int test_step(struct definitions *defs) {
 		}
 	}
 
-	if (IF_HUMAN(defs->flags)) {
+	if (IS_HUMAN(defs->flags)) {
 		fprintf(stdout,"[+] Testing\n");
 	}
 
@@ -564,7 +714,7 @@ int test_step(struct definitions *defs) {
 int discard_device(struct definitions *defs) {
 	unsigned long long range[2];
 
-	if (IF_RANDOMIO(defs->flags)) {
+	if (IS_RANDOMIO(defs->flags)) {
 		range[0] = 0;
 		range[1] = defs->dev_size;
 	} else {
@@ -593,9 +743,7 @@ int main (int argc, char **argv) {
 	defs.flags = 0;
 	rec.step = 0;
 
-	srandom((unsigned) time(NULL));
-
-	while ((c = getopt(argc, argv, "hzbs:r:t:d:R:")) != EOF) {
+	while ((c = getopt(argc, argv, "hxzbs:r:t:d:R:")) != EOF) {
 		switch (c) {
 			case 's': /* starting point */
 				if ((defs.start = get_number(&optarg)) == 0) {
@@ -634,6 +782,10 @@ int main (int argc, char **argv) {
 			case 'z':
 				defs.flags |= DISCARD2;
 				break;
+			case 'x':
+				defs.flags |= RANDOMIO;
+				srandom((unsigned) time(NULL));
+				break;
 			default:
 				usage(argv[0]);
 				break;
@@ -667,9 +819,9 @@ int main (int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	if (IF_DISCARD2(defs.flags)) {
+	if (IS_DISCARD2(defs.flags)) {
 
-		if (IF_HUMAN(defs.flags)) {
+		if (IS_HUMAN(defs.flags)) {
 			fprintf(stdout,"[+] Discarding device");
 		}
 
@@ -688,25 +840,40 @@ int main (int argc, char **argv) {
 	err = 0;
 	for (unsigned long long i = 1;i <= repeat;i++) {
 
+		/* round total size to record size */
+		defs.total_size = (unsigned long long)
+						  (((double)defs.total_size / defs.record_size) + 0.5);
+		defs.total_size *= (defs.record_size);
+
+		if (IS_RANDOMIO(defs.flags)) {
+			if ((err = init_list()) == -1) {
+				break;
+			}
+		}
+
 		/* check boundaries */
 		if ((defs.start + defs.total_size) > defs.dev_size) {
 			fprintf(stderr,"Boundaries does not fit in the device\n");
-			return EXIT_FAILURE;
+			err = -1;
+			break;
 		}
 		
-		if (IF_HUMAN(defs.flags)) {
+		if (IS_HUMAN(defs.flags)) {
 			fprintf(stdout,"\n[+] Running test\n");
 			fprintf(stdout,"Start: %llu\nRecord size: %llu\nTotal size: %llu\n\n",
 				defs.start,defs.record_size,defs.total_size);
 		}
 
 		/* run test */
-		if ((err = test_step(&defs)) == -1)
+		if ((err = test_step(&defs)) == -1) {
 			break;
+		}
 
 		/* next boundaries */
 		defs.record_size = rec.start + rec.step * i;
 	} 
+
+	free_list();
 
 	/* close device */
 	if (close(defs.fd) == -1) {

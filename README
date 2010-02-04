@@ -22,11 +22,25 @@ installed.
 #######################################################################
 # Function Principle
 
-Invoke ioctl with BLKDISCARD flag and defined range repetitively as the
-specified amount of is discarded. Running time of each ioctl invocation
-is measured and stored (also min and max) as well as number of 
-invocations,range size. From this data we can compute average ioctl
-running time, overall ioctl sunning time (sum) and throughput.
+Invoke ioctl with BLKDISCARD flag and defined range repetitively until 
+the specified amount of data is discarded. Running time of each ioctl 
+invocation is measured and stored (also min and max) as well as number 
+of invocations and range size. From collected data we can compute 
+average ioctl running time, overall ioctl sunning time (sum) and 
+throughput.
+
+In random IO mode discard range is not determined sequentially but
+picked randomly anywhere on the disk, but it is of course aligned to
+the range_size. Already discarded blocks are stored in the list. Before
+each discard operation random block is generated and added to the list,
+possibly altered if the block was already discarded. There is one 
+limitation though, if the record size is to low and disk size is too
+high, only a part of disk will be used. To be specific :
+
+	max_tested_disck_size = INT_MAX * record_size;
+
+This means, that with 4kB record_size you can use disk up to 8TB, at 
+least on x86_64.
 
 
 #######################################################################
@@ -45,6 +59,7 @@ running time, overall ioctl sunning time (sum) and throughput.
  <record_size> <total_size> <min> <max> <avg> <sum> <throughput in MB/s>
 
 -z     Discard already discarded blocks
+-x     Run test witch random IO pattern [-s] will be ignored
 -h     Print this help
 
 \"num\" can be specified either as a ordinary number, or as a
