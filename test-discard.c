@@ -623,7 +623,7 @@ void print_results(
 	if (IS_HUMAN(defs->flags)) {
 
 		/* Print results */
-		fprintf(stdout,"\n[+] RESULTS\nmin = %lfs\nmax = %lfs\navg = %lfs\n",
+		fprintf(stdout,"[+] RESULTS\nmin = %lfs\nmax = %lfs\navg = %lfs\n",
 			stats->min, stats->max, 
 			stats->sum/(double) stats->count
 		);
@@ -785,6 +785,7 @@ int main (int argc, char **argv) {
 			case 'x':
 				defs.flags |= RANDOMIO;
 				srandom((unsigned) time(NULL));
+				defs.start = 0;
 				break;
 			default:
 				usage(argv[0]);
@@ -819,10 +820,16 @@ int main (int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
+	/* check boundaries */
+	if ((defs.start + defs.total_size) > defs.dev_size) {
+		fprintf(stderr,"Boundaries does not fit in the device\n");
+		return EXIT_FAILURE;
+	}
+
 	if (IS_DISCARD2(defs.flags)) {
 
 		if (IS_HUMAN(defs.flags)) {
-			fprintf(stdout,"[+] Discarding device");
+			fprintf(stdout,"[+] Discarding device\n");
 		}
 
 		if (discard_device(&defs) == -1) {
