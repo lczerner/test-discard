@@ -71,6 +71,7 @@
 #include <errno.h>
 #include <time.h>
 #include <assert.h>
+#include <stdint.h>
 
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
@@ -107,6 +108,7 @@ struct definitions {
 	unsigned long long record_size;
 	unsigned long long total_size;
 	unsigned long long dev_size;
+	int dev_ssize;
 	char target[PATH_MAX];
 	int fd;
 	int flags;
@@ -379,11 +381,11 @@ int run_ioctl(
 	struct definitions *defs,
 	struct statistics *stats) 
 {
-	unsigned long long next_hop, next_start;
+	uint64_t next_hop, next_start;
 	double time;
 	struct timeval tv_start, tv_stop;
 	long int block;
-	unsigned long long range[2];
+	uint64_t range[2];
 
 	/* Sanity check */
 	if ((defs->record_size < 1) || 
@@ -414,14 +416,14 @@ int run_ioctl(
 			}
 
 			range[0] = block * defs->record_size;
-			range[1] = range[0] + defs->record_size;
+			range[1] = defs->record_size;
 
-			if (range[1] > defs->dev_size) {
-				range[1] = defs->dev_size;
+			if ((range[0] + range[1]) > defs->dev_size) {
+				range[1] = defs->dev_size - range[0];
 			}
 		} else {
 			range[0] = next_start;
-			range[1] = next_hop;
+			range[1] = defs->record_size;
 		}
 
 		if (gettimeofday(&tv_start, (struct timezone *) NULL) == -1) {
@@ -552,7 +554,7 @@ int get_range(char *optarg,struct records *rec) {
  */
 unsigned long long
 get_device_size(const int fd) {
-	unsigned long long nblocks;
+	uint64_t nblocks;
 
 /*
  *BLKBSZGET - logical block size
@@ -561,13 +563,28 @@ get_device_size(const int fd) {
  *BLKGETSIZE64 - return device size in bytes (u64 *arg) 
  * */
 
-	if (ioctl(fd, BLKGETSIZE64 ,&nblocks) == -1) {
+	if (ioctl(fd, BLKGETSIZE64,&nblocks) == -1) {
 		perror("Ioctl block device");
 		return 0;
 	}
 
-	return nblocks;
+	return (unsigned long long)nblocks;
 } /* get_device_size */
+
+
+/**
+ * Determine device sector size
+ */
+int get_sector_size(const int fd) {
+	int ssize;
+
+	if (ioctl(fd, BLKSSZGET, &ssize) == -1) {
+		perror("Ioctl block device");
+		return 0;
+	}
+
+	return ssize;
+} /* get sector size */
 
 
 /**
@@ -582,34 +599,97 @@ int get_entropy(char *entropy, int size) {
 
 
 /**
+ * Write defined amount of pseudorandom  data to the device
+ */
+int write_data(int fd, uint64_t start, uint64_t size) {
+	char entropy[ENT_SIZE];
+	ssize_t step;
+	int64_t total;
+
+	get_entropy(entropy,ENT_SIZE);
+
+	if (lseek64(fd,(off64_t)start,SEEK_SET) == -1) {
+		perror("prepare_device lseek");
+		return -1;
+	}
+
+	total = (int64_t)((size / (double)ENT_SIZE) + 0.5);
+
+	while (total) {
+		total--;
+
+		if ((step = write(fd,entropy,ENT_SIZE)) == -1) {
+			if (errno == ENOSPC) {
+				continue;
+			}
+			perror("prepare_device write");
+			return -1;
+		}
+
+		if (step < (ssize_t)ENT_SIZE) {
+			fprintf(stderr,"write_data: Written size is smaller than expected\n");
+			return -1;
+		}
+	}
+
+	fsync(fd);
+
+	return 0;
+} /* write data */
+
+
+/**
  * Write some data to the device in order to prevent
  * discarding already discarded blocks
  */
 int prepare_device (struct definitions *defs) {
 	char entropy[ENT_SIZE];
-	unsigned long long total;
-	int step;
+	uint64_t total;
 
 	get_entropy(entropy,ENT_SIZE);
 
-	if (lseek(defs->fd,defs->start,SEEK_SET) == -1) {
-		perror("prepare_device lseek");
-		return -1;
+	if (IS_RANDOMIO(defs->flags)) {
+		defs->start = 0;
+		total = defs->dev_size;
+	} else {
+		total = defs->total_size;
 	}
 
-	total = 0;
-	while (total < defs->total_size) {
-		if ((step = write(defs->fd,entropy,ENT_SIZE)) == -1) {
-			perror("prepare_device write");
+	return write_data(defs->fd,defs->start,total);
+} /* prepare_device */
+
+
+/**
+ * Overwrite only discarded blocks
+ */
+int prepare_by_list(struct definitions *defs) {
+	char entropy[ENT_SIZE];
+	DISCARDED_LIST *item;
+	uint64_t total;
+
+	get_entropy(entropy,ENT_SIZE);
+	item = discarded_head;
+
+	while (item) {
+
+		total = (item->end - item->start) * defs->record_size;
+
+		if (total == 0) {
+			item = item->list_next;
+			continue;
+		}
+
+		if (write_data(defs->fd,(item->start * defs->record_size),total) == -1) {
 			return -1;
 		}
-		total += step;
+
+		item = item->list_next;
 	}
 
 	fsync(defs->fd);
 
 	return 0;
-} /* prepare_device */
+} /* prepare_by_list */
 
 
 /**
@@ -662,15 +742,6 @@ int test_step(struct definitions *defs) {
 	stats.sum = 0;
 	stats.count = 0;
 
-	if (!IS_DISCARD2(defs->flags)) {
-		if (IS_HUMAN(defs->flags)) {
-			fprintf(stdout,"[+] Preparing device\n");
-		}
-		if (prepare_device(defs) == -1) {
-			return -1;
-		}
-	}
-
 	if (IS_HUMAN(defs->flags)) {
 		fprintf(stdout,"[+] Testing\n");
 	}
@@ -712,14 +783,14 @@ int test_step(struct definitions *defs) {
  * randomio flag is set
  */
 int discard_device(struct definitions *defs) {
-	unsigned long long range[2];
+	uint64_t range[2];
 
 	if (IS_RANDOMIO(defs->flags)) {
 		range[0] = 0;
 		range[1] = defs->dev_size;
 	} else {
 		range[0] = defs->start;
-		range[1] = defs->start + defs->total_size;
+		range[1] = defs->total_size;
 	}
 
 	if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
@@ -729,6 +800,59 @@ int discard_device(struct definitions *defs) {
 
 	return 0;
 } /* discard_device */
+
+/**
+ * Open the device and get infos about it
+ */
+int open_device(struct definitions *defs) {
+	
+	if ((defs->fd = open(defs->target, O_RDWR)) == -1) {
+		perror("Opening block device");
+		return -1;
+	}
+
+	if ((defs->dev_size = get_device_size(defs->fd)) == 0) {
+		close(defs->fd);
+		return -1;
+	}
+
+	if ((defs->dev_ssize = get_sector_size(defs->fd)) == 0) {
+		close(defs->fd);
+		return -1;
+	}
+
+	return 0;
+} /* open_device */
+
+
+/**
+ * Basic check of parameters sanity
+ */
+int check_sanity(struct definitions *defs) {
+
+	if (defs->total_size % defs->dev_ssize) {
+		fprintf(stderr,"Total size must be aligned to the sector size\n");
+		return -1;
+	}
+
+	if (defs->record_size % defs->dev_ssize) {
+		fprintf(stderr,"Record size must be aligned to the sector size\n");
+		return -1;
+	}
+
+	if (defs->start % defs->dev_ssize) {
+		fprintf(stderr,"Starting point must be aligned to the sector size\n");
+		return -1;
+	}
+
+	/* check boundaries */
+	if ((defs->start + defs->total_size) > defs->dev_size) {
+		fprintf(stderr,"Boundaries does not fit in the device\n");
+		return -1;
+	}
+
+	return 0;
+} /* check_sanity */
 
 int main (int argc, char **argv) {
 	int c, err;
@@ -810,19 +934,13 @@ int main (int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	
-	/* open device */
-	if ((defs.fd = open(defs.target, O_RDWR)) == -1) {
-		perror("Opening block device");
+	/* open device */	
+	if (open_device(&defs) == -1) {
 		return EXIT_FAILURE;
 	}
 
-	if ((defs.dev_size = get_device_size(defs.fd)) == 0) {
-		return EXIT_FAILURE;
-	}
-
-	/* check boundaries */
-	if ((defs.start + defs.total_size) > defs.dev_size) {
-		fprintf(stderr,"Boundaries does not fit in the device\n");
+	if (check_sanity(&defs) == -1) {
+		close(defs.fd);
 		return EXIT_FAILURE;
 	}
 
@@ -833,6 +951,7 @@ int main (int argc, char **argv) {
 		}
 
 		if (discard_device(&defs) == -1) {
+			close(defs.fd);
 			return EXIT_FAILURE;
 		}
 	}
@@ -847,22 +966,35 @@ int main (int argc, char **argv) {
 	err = 0;
 	for (unsigned long long i = 1;i <= repeat;i++) {
 
-		/* round total size to record size */
+		/* round total size to the multiple of the record_size */
 		defs.total_size = (unsigned long long)
-						  (((double)defs.total_size / defs.record_size) + 0.5);
+						  ((defs.total_size / (double)defs.record_size) + 0.5);
 		defs.total_size *= (defs.record_size);
 
+		/* check boundaries */
+		if ((defs.start + defs.total_size) > defs.dev_size) {
+			defs.total_size = defs.dev_size;
+		}
+
+		/* Prepare device if we are not in the DISCARD2 mode */
+		if (!IS_DISCARD2(defs.flags)) {
+			
+			if (IS_HUMAN(defs.flags)) {
+				fprintf(stdout,"[+] Preparing device\n");
+			}
+			
+			if ((!IS_RANDOMIO(defs.flags)) || (i == 1)) {
+				if ((err = prepare_device(&defs)) == -1) {
+					break;
+				}
+			}
+		}
+		
+		/* Initialize list in random IO mode */
 		if (IS_RANDOMIO(defs.flags)) {
 			if ((err = init_list()) == -1) {
 				break;
 			}
-		}
-
-		/* check boundaries */
-		if ((defs.start + defs.total_size) > defs.dev_size) {
-			fprintf(stderr,"Boundaries does not fit in the device\n");
-			err = -1;
-			break;
 		}
 		
 		if (IS_HUMAN(defs.flags)) {
@@ -874,6 +1006,20 @@ int main (int argc, char **argv) {
 		/* run test */
 		if ((err = test_step(&defs)) == -1) {
 			break;
+		}
+
+		/* Prepare device if we are not in the DISCARD2 mode */
+		if ((!IS_DISCARD2(defs.flags)) && (IS_RANDOMIO(defs.flags))) {
+			
+			if (IS_HUMAN(defs.flags)) {
+				fprintf(stdout,"[+] Preparing device\n");
+			}
+			
+			if (i <= repeat) {
+				if ((err = prepare_by_list(&defs)) == -1) {
+					break;
+				}
+			}
 		}
 
 		/* next boundaries */
