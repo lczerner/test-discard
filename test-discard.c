@@ -593,8 +593,15 @@ int get_sector_size(const int fd) {
 int get_entropy(char *entropy, int size) {
 	int ent_fd;
 	
-	ent_fd=open("/dev/urandom",O_RDONLY);
-	return read(ent_fd,entropy,size);
+	if ((ent_fd = open("/dev/urandom",O_RDONLY)) == -1) {
+		perror("Opening urandom device");
+		return -1;
+	}
+
+	read(ent_fd,entropy,size);
+	close(ent_fd);
+
+	return 0;
 } /* get_entropy */
 
 
@@ -606,7 +613,10 @@ int write_data(int fd, uint64_t start, uint64_t size) {
 	ssize_t step;
 	int64_t total;
 
-	get_entropy(entropy,ENT_SIZE);
+	if (get_entropy(entropy,ENT_SIZE) == -1) {
+		fprintf(stderr,"Error while gathering entropy\n");
+		return -1;
+	}
 
 	if (lseek64(fd,(off64_t)start,SEEK_SET) == -1) {
 		perror("prepare_device lseek");
