@@ -227,8 +227,7 @@ int init_list(void) {
 	free_list();
 
 	if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
-		/* CHANGE THIS - it is just temporary */
-		fprintf(stderr,"malloc error\n");
+		perror("malloc");
 		return -1;
 	}	
 
@@ -296,15 +295,19 @@ int guess_next_block(struct definitions *defs)
 
 	block = get_random_block(defs);
 	item = discarded_head;
-
+	
+	/* Going through the list */
 	while (item) {
 
+		/* block is not found in the list */
 		if (block < item->start) {
 			break;
 		}
-
+		
+		/* block is found inside list's item */
 		if ((block >= item->start) && (block <= item->end)) {
 
+			/* We reached the end of the device - trying from the start*/
 			if ((item->end) >= ((defs->dev_size / defs->record_size))) {
 				block = 0;
 				item = discarded_head;
@@ -314,6 +317,7 @@ int guess_next_block(struct definitions *defs)
 			block = item->end;
 			item->end++;
 
+			/* Are the items contiguous ? Merge them if so.*/
 			if (item->list_next) {
 				if (item->end >= item->list_next->start) {
 					merge_items(item,item->list_next);
@@ -327,17 +331,20 @@ int guess_next_block(struct definitions *defs)
 		previtem = item;
 		item = item->list_next;
 	}
-	
+
+	/* block was not found in the list - create a new item */	
 	if (item != discarded_head) {
 		if ((newitem = alloc_and_init(block)) == NULL) {
 			return -1;
 		}
-
+		
+		/* append the item at the end of the list ?*/
 		if (item == NULL) {
 			newitem->list_next = NULL;
 
 		} else {
-
+		
+			/* Are the items contiguous ? Merge them if so. */	
 			if (newitem->end >= item->start) {
 				merge_items(newitem,item);
 			} else {
@@ -370,7 +377,7 @@ int print_list() {
 	fprintf(stdout,"SUM: %llu\n",sum);
 
 	return 0;
-} 
+} /* print_list */
 
 
 /**
@@ -670,7 +677,12 @@ int prepare_device (struct definitions *defs) {
 
 
 /**
- * Overwrite only discarded blocks
+ * Overwrite only discarded blocks.
+ * Instead of overwriting whole disk with random
+ * data in order to prevent discarding already discarded
+ * blocks, simply overwrite only data discarded in 
+ * previous step - this information is stored in the 
+ * DISCARDED_LIST
  */
 int prepare_by_list(struct definitions *defs) {
 	char entropy[ENT_SIZE];
@@ -1018,7 +1030,8 @@ int main (int argc, char **argv) {
 			break;
 		}
 
-		/* Prepare device if we are not in the DISCARD2 mode */
+		/* Prepare device if we are not in the DISCARD2 
+		 * mode and we are in random IO mode*/
 		if ((!IS_DISCARD2(defs.flags)) && (IS_RANDOMIO(defs.flags))) {
 			
 			if (IS_HUMAN(defs.flags)) {
