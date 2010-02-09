@@ -660,10 +660,7 @@ int write_data(int fd, uint64_t start, uint64_t size) {
  * discarding already discarded blocks
  */
 int prepare_device (struct definitions *defs) {
-	char entropy[ENT_SIZE];
 	uint64_t total;
-
-	get_entropy(entropy,ENT_SIZE);
 
 	if (IS_RANDOMIO(defs->flags)) {
 		defs->start = 0;
