@@ -7,17 +7,57 @@ set ylabel "Duration [s]"
 set y2label "Throughput [MB/s]"
 set ytics nomirror
 set xtics nomirror
+set xrange [4:1024]
+set logscale x
+
 set title "Average duration of discard operations and Throughput in MB/s\n\
 depending on record size"
-plot "output.dat" using ($1/1024):5 title "Average duration", \
-"output.dat" using ($1/1024):7 axes x1y2 title "Throughput"
+plot "output.dat" using ($1/1024):5 title "Average duration" with steps, \
+"output.dat" using ($1/1024):7 axes x1y2 title "Throughput" with steps
+
 set title "Summary of duration of discard operations and Throughput in MB/s\n\
 depending on record size"
-plot "output.dat" using ($1/1024):6 title "Duration Summary", \
-"output.dat" using ($1/1024):7 axes x1y2 title "Throughput"
+plot "output.dat" using ($1/1024):6 title "Duration Summary" with steps, \
+"output.dat" using ($1/1024):7 axes x1y2 title "Throughput" with steps
+
 set title "Minimal and maximal durations depending on record size"
 unset y2tics
 unset y2label
-plot "output.dat" using ($1/1024):4 title "Max", \
-"output.dat" using ($1/1024):3 title "Min", \
-"output.dat" using ($1/1024):5 title "Average duration"
+unset logscale x
+plot "output.dat" using ($1/1024):4 title "Max" with steps, \
+"output.dat" using ($1/1024):3 title "Min" with steps, \
+"output.dat" using ($1/1024):5 title "Average duration" with steps
+
+
+set terminal gif size 800,600
+set style data line
+set y2tics
+set xlabel "Record size [kB]"
+set ylabel "Duration [s]"
+set y2label "Throughput [MB/s]"
+set ytics nomirror
+set xtics nomirror
+set xrange [4:1024]
+set logscale x
+
+set output "avg_duration.gif"
+set title "Average duration of discard operations and Throughput in MB/s\n\
+depending on record size"
+plot "output.dat" using ($1/1024):5 title "Average duration" with steps, \
+"output.dat" using ($1/1024):7 axes x1y2 title "Throughput" with steps
+
+set output "sum_duration.gif"
+set title "Summary of duration of discard operations and Throughput in MB/s\n\
+depending on record size"
+plot "output.dat" using ($1/1024):6 title "Duration Summary" with steps, \
+"output.dat" using ($1/1024):7 axes x1y2 title "Throughput" with steps
+
+set output "min_max_avg.gif"
+set title "Minimal and maximal durations depending on record size"
+unset y2tics
+unset y2label
+unset logscale x
+plot "output.dat" using ($1/1024):4 title "Max" with steps, \
+"output.dat" using ($1/1024):3 title "Min" with steps, \
+"output.dat" using ($1/1024):5 title "Average duration" with steps
+
