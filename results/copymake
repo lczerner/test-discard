@@ -1,0 +1,8 @@
+#!/bin/bash
+
+for subdir in ./* ; do
+	if [ -d $subdir ]; then
+		echo "Copying Makefile to $subdir"
+		cp Makefile.sub $subdir/Makefile
+	fi
+done

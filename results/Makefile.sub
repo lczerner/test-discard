@@ -1,0 +1,21 @@
+
+RM=/bin/rm
+GNUPLOT=/usr/bin/gnuplot
+GNUPLOTSCRIPT=plot.dis
+PS2PDF=/usr/bin/ps2pdf
+EVINCE=/usr/bin/evince
+GRAPHNAME=graphs
+
+all: clean make_plots convert_ps
+
+make_plots:
+	$(GNUPLOT) $(GNUPLOTSCRIPT)
+
+convert_ps:
+	$(PS2PDF) $(GRAPHNAME).ps $(GRAPHNAME).pdf
+
+clean:
+	$(RM) -f $(GRAPHNAME).* *.gif
+
+view:
+	$(EVINCE) $(GRAPHNAME).pdf
