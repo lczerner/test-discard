@@ -70,7 +70,6 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
-#include <assert.h>
 #include <stdint.h>
 
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
@@ -307,7 +306,7 @@ int guess_next_block(struct definitions *defs)
 		/* block is found inside list's item */
 		if ((block >= item->start) && (block <= item->end)) {
 
-			/* We reached the end of the device - trying from the start*/
+			/* We reached the end of the device - trying from the beginning */
 			if ((item->end) >= ((defs->dev_size / defs->record_size))) {
 				block = 0;
 				item = discarded_head;
@@ -338,8 +337,8 @@ int guess_next_block(struct definitions *defs)
 			return -1;
 		}
 		
-		/* append the item at the end of the list ?*/
 		if (item == NULL) {
+			/* append the item at the end of the list */
 			newitem->list_next = NULL;
 
 		} else {
@@ -626,7 +625,7 @@ int write_data(int fd, uint64_t start, uint64_t size) {
 	}
 
 	if (lseek64(fd,(off64_t)start,SEEK_SET) == -1) {
-		perror("prepare_device lseek");
+		perror("write_data lseek");
 		return -1;
 	}
 
@@ -639,7 +638,7 @@ int write_data(int fd, uint64_t start, uint64_t size) {
 			if (errno == ENOSPC) {
 				continue;
 			}
-			perror("prepare_device write");
+			perror("write_data write");
 			return -1;
 		}
 
@@ -801,16 +800,11 @@ int test_step(struct definitions *defs) {
  * Discard part of the device or whole device if the
  * randomio flag is set
  */
-int discard_device(struct definitions *defs) {
+int discard_whole_device(struct definitions *defs) {
 	uint64_t range[2];
 
-	if (IS_RANDOMIO(defs->flags)) {
-		range[0] = 0;
-		range[1] = defs->dev_size;
-	} else {
-		range[0] = defs->start;
-		range[1] = defs->total_size;
-	}
+	range[0] = 0;
+	range[1] = defs->dev_size;
 
 	if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 		perror("Ioctl BLKDISCARD");
@@ -818,7 +812,7 @@ int discard_device(struct definitions *defs) {
 	}
 
 	return 0;
-} /* discard_device */
+} /* discard_whole_device */
 
 /**
  * Open the device and get infos about it
@@ -962,17 +956,14 @@ int main (int argc, char **argv) {
 		close(defs.fd);
 		return EXIT_FAILURE;
 	}
-
-	if (IS_DISCARD2(defs.flags)) {
-
-		if (IS_HUMAN(defs.flags)) {
-			fprintf(stdout,"[+] Discarding device\n");
-		}
-
-		if (discard_device(&defs) == -1) {
-			close(defs.fd);
-			return EXIT_FAILURE;
-		}
+	
+	/* Initial discard */
+	if (IS_HUMAN(defs.flags)) {
+		fprintf(stdout,"[+] Discarding device\n");
+	}
+	if (discard_whole_device(&defs) == -1) {
+		close(defs.fd);
+		return EXIT_FAILURE;
 	}
 
 	if (rec.step == 0) {
