@@ -1,13 +1,18 @@
 #######################################################################
 # (C)2009 Red Hat, Inc., Lukas Czerner <lczerner@redhat.com>
 
-This is a simple tool for testing linux discard ability. You can specify
-amount of total data which will be discarded, starting point where
-discarding begin and record size which will be repetitively discarded
-until total amount of data is discarded. Also you must specify device
-which should be tested. There is no need to write any data to the device
-before you invoke the test. Before each test, desired amount of data is
-written to the device on the desired place.
+This is a simple tool for benchmarking device discard (TRIM) performance.
+According to benchmark parameters the tool will repetitively call
+BLKDISCARD ioctl on the specified device with specified parameters
+collecting performance statistics.
+
+You can specify several parameter for the test. First of all you can
+specify the overall amount of Bytes to discard, the bigger the value is,
+the bigger discard ranges you can test, the more precise result you will
+obtain, and the longer will the test take. Then you can specify device
+LBA to start with discard test and record size. There are three modes
+of the test: sequential test, random I/O test and test where we are
+discarding already discarded blocks.
 
 There is also support for automated testing of range of record sizes.
 You just need to specify starting, ending and step record size and the

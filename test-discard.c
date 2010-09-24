@@ -75,18 +75,17 @@
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
 
-#define ENT_SIZE 4096				/* size of entropy */
+#define ENT_SIZE 4096			/* size of entropy */
 
-#define BATCHOUT	1				/* batch output */
-#define DISCARD2	2				/* discard already discarded */
-#define RANDOMIO	4				/* random IO pattern */
+#define BATCHOUT	1		/* batch output */
+#define DISCARD2	2		/* discard already discarded */
+#define RANDOMIO	4		/* random IO pattern */
 
-#define IS_HUMAN(x)			(~x & BATCHOUT)
+#define IS_HUMAN(x)		(~x & BATCHOUT)
 #define IS_DISCARD2(x)		(x & DISCARD2)
 #define IS_RANDOMIO(x)		(x & RANDOMIO)
 
 int stop;
-
 
 /**
  * Structure for collecting statistics data
@@ -173,7 +172,8 @@ void crit_err(void) {
  * Print program usage
  */
 void usage(char *program) {
-	fprintf(stdout, "%s [-h] [-b] [-s start] [-r record_size] [-t total_size] [-d device] [-R start:end:step] \
+	fprintf(stdout, "%s [-h] [-b] [-s start] [-r record_size] "
+	"[-t total_size] [-d device] [-R start:end:step] \
 	[-z] [-x]\n\n\
 	-s num Starting point of the discard\n\
 	-r num Size of the record discarded in one step\n\
@@ -306,8 +306,12 @@ int guess_next_block(struct definitions *defs)
 		/* block is found inside list's item */
 		if ((block >= item->start) && (block <= item->end)) {
 
-			/* We reached the end of the device - trying from the beginning */
-			if ((item->end) >= ((defs->dev_size / defs->record_size))) {
+			/*
+			 * We reached the end of the device
+			 * trying from the beginning 
+			 */
+			if ((item->end) >= 
+			    ((defs->dev_size / defs->record_size))) {
 				block = 0;
 				item = discarded_head;
 				continue;
@@ -343,7 +347,7 @@ int guess_next_block(struct definitions *defs)
 
 		} else {
 		
-			/* Are the items contiguous ? Merge them if so. */	
+			/* Are the items contiguous ? Merge them if so. */
 			if (newitem->end >= item->start) {
 				merge_items(newitem,item);
 			} else {
@@ -398,7 +402,8 @@ int run_ioctl(
 		(defs->total_size < defs->record_size)) 
 	{
 		fprintf(stderr,
-			"Insane boundaries! Block size = %llu, Total size = %llu\n"
+			"Insane boundaries! Block size = %llu,"
+			" Total size = %llu\n"
 			,defs->record_size,defs->total_size);
 		return 1;
 	}
@@ -503,19 +508,22 @@ get_number(char **optarg) {
 				break;
 			case ':': /* delimiter */
 				if ((number > max) || (number == 0)) {
-					fprintf(stderr,"Numeric argument out of range\n");
+					fprintf(stderr,"Numeric argument "
+						"out of range\n");
 					return 0;
 				}
 				*optarg = opt;
 				return number;
 			case '\0': /* end of the string */
 				if ((number > max) || (number == 0)) {
-					fprintf(stderr,"Numeric argument out of range\n");
+					fprintf(stderr,"Numeric argument "
+						"out of range\n");
 					return 0;
 				}
 				return number;
 			default:
-				fprintf(stderr,"Bad syntax of numeric argument\n");
+				fprintf(stderr,"Bad syntax of "
+					"numeric argument\n");
 				return 0;
 		}
 	}
@@ -643,7 +651,8 @@ int write_data(int fd, uint64_t start, uint64_t size) {
 		}
 
 		if (step < (ssize_t)ENT_SIZE) {
-			fprintf(stderr,"write_data: Written size is smaller than expected\n");
+			fprintf(stderr,"write_data: Written size is "
+				"smaller than expected\n");
 			return -1;
 		}
 	}
@@ -697,7 +706,8 @@ int prepare_by_list(struct definitions *defs) {
 			continue;
 		}
 
-		if (write_data(defs->fd,(item->start * defs->record_size),total) == -1) {
+		if (write_data(defs->fd,
+		    (item->start * defs->record_size),total) == -1) {
 			return -1;
 		}
 
@@ -978,7 +988,7 @@ int main (int argc, char **argv) {
 
 		/* round total size to the multiple of the record_size */
 		defs.total_size = (unsigned long long)
-						  ((defs.total_size / (double)defs.record_size) + 0.5);
+			((defs.total_size / (double)defs.record_size) + 0.5);
 		defs.total_size *= (defs.record_size);
 
 		/* check boundaries */
