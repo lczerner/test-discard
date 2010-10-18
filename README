@@ -31,7 +31,7 @@ Invoke ioctl with BLKDISCARD flag and defined range repetitively until
 the specified amount of data is discarded. Running time of each ioctl 
 invocation is measured and stored (also min and max) as well as number 
 of invocations and range size. From collected data we can compute 
-average ioctl running time, overall ioctl sunning time (sum) and 
+average ioctl running time, overall ioctl running time (sum) and 
 throughput.
 
 In random IO mode discard range is not determined sequentially but
@@ -42,7 +42,7 @@ possibly altered if the block was already discarded. There is one
 limitation though, if the record size is to low and disk size is too
 high, only a part of disk will be used. To be specific :
 
-	max_tested_disck_size = INT_MAX * record_size;
+	max_tested_disk_size = INT_MAX * record_size;
 
 This means, that with 4kB record_size you can use disk up to 8TB, at 
 least on x86_64.
@@ -127,3 +127,18 @@ The script will handle the rest, even creates graphs. The testing
 options in this case are identical to the example above, so pe patient
 this will take a while.
 
+#######################################################################
+# Licence:
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.

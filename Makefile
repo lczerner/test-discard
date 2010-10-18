@@ -8,5 +8,14 @@ ALL: $(PROGRAM)
 $(PROGRAM): $(SRC)
 	$(CC) $(CFLAGS) $(SRC) -o $@
 
+archive: tar bzip
+
+tar:
+	git archive --format=tar --prefix=test-discard/ HEAD -o archive.tar
+
+bzip:
+	bzip2 archive.tar
+
+
 clean:
 	rm -rf *.o test-discard *.dat *.ps *.pdf

@@ -1,15 +1,28 @@
 /**
  * (C)2009 Red Hat, Inc., Lukas Czerner <lczerner@redhat.com>
  *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  * What it does ?
  * Invoke ioctl with BLKDISCARD flag and defined range repetitively as the
  * specified amount of is discarded. Running time of each ioctl invocation
- * is measured and stored (also min and max) as well as number of 
+ * is measured and stored (also min and max) as well as number of
  * invocations,range size. From this data we can compute average ioctl
  * running time, overall ioctl sunning time (sum) and throughput.
  *
  * usage: 
- *	<program> [-h] [-b] [-s start] [-r record_size] [-t total_size] 
+ *	<program> [-h] [-b] [-s start] [-r record_size] [-t total_size]
  *	[-d device] [-R start:end:step] [-z]
  *		
  *	-s num Starting point of the discard
@@ -55,6 +68,7 @@
  *	20480 10485760 0.076724 0.142325 0.087052 44.570576 0.224363
  *	...
  *	...etc
+ *
  */
 
 #include <linux/fs.h>
