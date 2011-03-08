@@ -86,6 +86,12 @@
 #include <time.h>
 #include <stdint.h>
 
+/* Do not call BLKDISCARD ioctl() */
+/*#define DEBUG_NO_DISCARD*/
+
+/* Do not prepare device prior testing */
+/*#define DEBUG_NO_PREPARE*/
+
 #define DEF_REC_SIZE 4096ULL		/* 4KB  */
 #define DEF_TOT_SIZE 10485760ULL	/* 10MB */
 
@@ -456,10 +462,12 @@ int run_ioctl(
 			return 1;
 		}
 
+#ifndef DEBUG_NO_DISCARD
 		if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 			perror("Ioctl BLKDISCARD");
 			return 1;
 		}
+#endif
 
 		if (gettimeofday(&tv_stop, (struct timezone *) NULL) == -1) {
 			perror("gettimeofday");
@@ -691,7 +699,11 @@ int prepare_device (struct definitions *defs) {
 		total = defs->total_size;
 	}
 
+#ifndef DEBUG_NO_PREPARE
 	return write_data(defs->fd,defs->start,total);
+#else
+	return 0;
+#endif
 } /* prepare_device */
 
 
@@ -720,10 +732,12 @@ int prepare_by_list(struct definitions *defs) {
 			continue;
 		}
 
+#ifndef DEBUG_NO_PREPARE
 		if (write_data(defs->fd,
 		    (item->start * defs->record_size),total) == -1) {
 			return -1;
 		}
+#endif
 
 		item = item->list_next;
 	}
@@ -830,10 +844,12 @@ int discard_whole_device(struct definitions *defs) {
 	range[0] = 0;
 	range[1] = defs->dev_size;
 
+#ifndef DEBUG_NO_DISCARD
 	if (ioctl(defs->fd, BLKDISCARD, &range) == -1) {
 		perror("Ioctl BLKDISCARD");
 		return -1;
 	}
+#endif
 
 	return 0;
 } /* discard_whole_device */
