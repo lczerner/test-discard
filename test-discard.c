@@ -86,6 +86,8 @@
 #include <time.h>
 #include <stdint.h>
 
+#include "libs/rbtree.h"
+
 /* Do not call BLKDISCARD ioctl() */
 /*#define DEBUG_NO_DISCARD*/
 
@@ -143,39 +145,38 @@ struct records {
 };
 
 
-typedef struct discarded_list DISCARDED_LIST;
-
 /**
- * Structure for creating list of discarded 
+ * Structure for creating tree of discarded
  * records
  */
-struct discarded_list {
+struct discarded_entry {
 	unsigned long long start;
-	unsigned long long end;
-	DISCARDED_LIST *list_next;
+	unsigned long long count;
+	struct rb_node node;
 };
 
-DISCARDED_LIST *discarded_head = NULL;
+struct rb_root discarded_root;
 
+void free_entry(struct discarded_entry **entry) {
+	free(*entry);
+	*entry = NULL;
+}
 
 /**
- * Free the list 
+ * Free the tree
  */
-void free_list(void) {
-	DISCARDED_LIST *item = NULL;
-	DISCARDED_LIST *nextitem = NULL;
+void free_tree(void) {
+	struct rb_node *node, *next;
+	struct discarded_entry *entry;
 
-	item = discarded_head;
-
-	while (item) {
-		nextitem = item->list_next;
-		free(item);
-		item = nextitem;
+	for (node = rb_first(&discarded_root); node; node = next) {
+		next = rb_next(node);
+		entry = rb_entry(node, struct discarded_entry, node);
+		rb_erase(node, &discarded_root);
+		free_entry(&entry);
 	}
-	
-	discarded_head = NULL;
 
-} /* free_list */
+} /* free_tree */
 
 
 /**
@@ -183,7 +184,7 @@ void free_list(void) {
  */
 void crit_err(void) {
 	fprintf(stderr,"Critical failure: You found a BUG!\n");
-	free_list();
+	free_tree();
 	exit(EXIT_FAILURE);
 } /* crit_err */
 
@@ -236,172 +237,86 @@ get_random_block(struct definitions *defs)
 	return (random() % max);
 } /* get_random_block */
 
-
-/**
- * Initialize list with first item 
- */
-int init_list(void) {
-	DISCARDED_LIST *newitem = NULL;
-
-	free_list();
-
-	if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
-		perror("malloc");
-		return -1;
-	}	
-
-	newitem->start = 0;
-	newitem->end = 0;
-	newitem->list_next = NULL;
-
-	discarded_head = newitem;
-
-	return 0;
-} /* init_list */
-
-
-/**
- * Merge two items of the list into the one and free
- * the second one
- */
-void merge_items(DISCARDED_LIST *item1, DISCARDED_LIST *item2) {
-
-	item1->end = item2->end;
-	item1->list_next = item2->list_next;
-
-	free(item2);
-
-} /* merge_items */
-
-
 /**
  * Allocate new item and initialize it with block 
  * values
  */
-DISCARDED_LIST *alloc_and_init(long int block) {
-	DISCARDED_LIST *newitem = NULL;
+struct discarded_entry *alloc_and_init(long int block) {
+	struct discarded_entry *new = NULL;
 
-	if ((newitem = malloc(sizeof(DISCARDED_LIST))) == NULL) { 
+	if ((new = malloc(sizeof(struct discarded_entry))) == NULL) {
 		perror("malloc");
 		return NULL;
 	}	
 
-	newitem->start = block;
-	newitem->end = (block + 1);
+	new->start = block;
+	new->count = 1;
 
-	return newitem;
+	return new;
 } /* alloc_and_init */
-
 
 /**
  * Guess the next block in three steps :
  * 1. Get random block
- * 2. Find random block in the list, possibly extend item
- *    and update block
- * 3. If no suitable item was found in the list, create
- *    new one and add it to the list (and keep list sorted)
+ * 2. Search for the matching extent
+ * 3. If not found create new one, otherwise extend existing
+ * 4. See if we can merge to the right
  */
 int guess_next_block(struct definitions *defs) 
 {
 	long int block;
-	DISCARDED_LIST *newitem = NULL;
-	DISCARDED_LIST *previtem = NULL;
-	DISCARDED_LIST *item = NULL;
-
-	if (discarded_head == NULL) {
-		crit_err();
-	}
+	struct rb_node *parent = NULL, **n = &discarded_root.rb_node;
+	struct discarded_entry *entry, *new_entry;
+	struct rb_node *new_node, *node;
 
 	block = get_random_block(defs);
-	item = discarded_head;
-	
-	/* Going through the list */
-	while (item) {
 
-		/* block is not found in the list */
-		if (block < item->start) {
-			break;
-		}
-		
-		/* block is found inside list's item */
-		if ((block >= item->start) && (block <= item->end)) {
+	while (*n) {
+		parent = *n;
+		entry = rb_entry(parent, struct discarded_entry, node);
 
-			/*
-			 * We reached the end of the device
-			 * trying from the beginning 
-			 */
-			if ((item->end) >= 
-			    ((defs->dev_size / defs->record_size))) {
+		if (block < entry->start) {
+			n = &(*n)->rb_left;
+		} else if (block > (entry->start + entry->count)) {
+			n = &(*n)->rb_right;
+		} else {
+			long int end = entry->start + entry->count;
+
+			if (end > (defs->dev_size / defs->record_size)) {
 				block = 0;
-				item = discarded_head;
+				n = &discarded_root.rb_node;
 				continue;
 			}
 
-			block = item->end;
-			item->end++;
-
-			/* Are the items contiguous ? Merge them if so.*/
-			if (item->list_next) {
-				if (item->end >= item->list_next->start) {
-					merge_items(item,item->list_next);
-				}
-			}
-
-			item = discarded_head;
-			break;
+			entry->count += 1;
+			block = end;
+			new_entry = entry;
+			new_node = &new_entry->node;
+			goto skip_insert;
 		}
-
-		previtem = item;
-		item = item->list_next;
 	}
 
-	/* block was not found in the list - create a new item */	
-	if (item != discarded_head) {
-		if ((newitem = alloc_and_init(block)) == NULL) {
-			return -1;
-		}
-		
-		if (item == NULL) {
-			/* append the item at the end of the list */
-			newitem->list_next = NULL;
+	if ((new_entry = alloc_and_init(block)) == NULL)
+		return -1;
+	new_node = &new_entry->node;
+	rb_link_node(new_node, parent, n);
+	rb_insert_color(new_node, &discarded_root);
 
-		} else {
-		
-			/* Are the items contiguous ? Merge them if so. */
-			if (newitem->end >= item->start) {
-				merge_items(newitem,item);
-			} else {
-				newitem->list_next = item;
-			}
+skip_insert:
+	/* See if we can merge to the right */
+	node = rb_next(new_node);
+	if (node) {
+		entry = rb_entry(node, struct discarded_entry, node);
+		if (entry->start == new_entry->start + new_entry->count) {
+			new_entry->count += entry->count;
+			rb_erase(node, &discarded_root);
+			free_entry(&entry);
 		}
-		previtem->list_next = newitem;
 	}
 
 	return block;
-} /* get_random_range */
 
-
-/**
- * Print whole list - ONLY FOR DEBUGGING
- */
-int print_list() {
-	DISCARDED_LIST *item = NULL;
-	unsigned long long sum = 0;
-
-	item = discarded_head;
-
-	while (item) {
-		fprintf(stdout,"%llu - %llu\n",item->start, item->end);
-		fprintf(stdout,"GREP %llu\n",item->end - item->start);
-		sum += ((item->end - item->start) + 1);
-		item = item->list_next;
-	}
-
-	fprintf(stdout,"SUM: %llu\n",sum);
-
-	return 0;
-} /* print_list */
-
+} /* guess_next_block */
 
 /**
  * Discards defined amount of data on the device by issuing ioctl with defined 
@@ -715,37 +630,48 @@ int prepare_device (struct definitions *defs) {
  * previous step - this information is stored in the 
  * DISCARDED_LIST
  */
-int prepare_by_list(struct definitions *defs) {
+int prepare_by_tree(struct definitions *defs) {
+	struct rb_node *node;
+	struct discarded_entry *entry, *prev = NULL;
 	char entropy[ENT_SIZE];
-	DISCARDED_LIST *item;
-	uint64_t total;
+	unsigned long long total;
 
 	get_entropy(entropy,ENT_SIZE);
-	item = discarded_head;
 
-	while (item) {
+	for (node = rb_first(&discarded_root); node; node = rb_next(node)) {
+		entry = rb_entry(node, struct discarded_entry, node);
 
-		total = (item->end - item->start) * defs->record_size;
+		total = (entry->count * defs->record_size);
 
 		if (total == 0) {
-			item = item->list_next;
-			continue;
+			fprintf(stderr, "Programming error: total = %llu\n",
+				total);
+			crit_err();
+		}
+
+		if (prev && (prev->start + prev->count >= entry->start)) {
+			fprintf(stderr, "Programming error tree is corrupted:\n"
+					" prev %llu->%llu(%llu)\n"
+					" cur %llu->%llu(%llu)\n",
+					prev->start, prev->start + prev->count,
+					prev->count, entry->start,
+					entry->start + entry->count,
+					entry->count);
+			crit_err();
 		}
 
 #ifndef DEBUG_NO_PREPARE
 		if (write_data(defs->fd,
-		    (item->start * defs->record_size),total) == -1) {
+		    (entry->start * defs->record_size),total) == -1) {
 			return -1;
 		}
 #endif
-
-		item = item->list_next;
+		prev = entry;
 	}
-
 	fsync(defs->fd);
 
 	return 0;
-} /* prepare_by_list */
+} /* prepare_by_tree */
 
 
 /**
@@ -912,7 +838,7 @@ int main (int argc, char **argv) {
 	struct stat sb;
 	struct definitions defs;
 	struct records rec;
-	unsigned long long repeat;
+	unsigned long long repeat, i;
 
 	defs.record_size = DEF_REC_SIZE;
 	defs.total_size = DEF_TOT_SIZE;
@@ -1014,7 +940,7 @@ int main (int argc, char **argv) {
 	}
 
 	err = 0;
-	for (unsigned long long i = 1;i <= repeat;i++) {
+	for (i = 1;i <= repeat;i++) {
 
 		/* round total size to the multiple of the record_size */
 		defs.total_size = (unsigned long long)
@@ -1041,11 +967,8 @@ int main (int argc, char **argv) {
 		}
 		
 		/* Initialize list in random IO mode */
-		if (IS_RANDOMIO(defs.flags)) {
-			if ((err = init_list()) == -1) {
-				break;
-			}
-		}
+		if (IS_RANDOMIO(defs.flags))
+			discarded_root = RB_ROOT;
 		
 		if (IS_HUMAN(defs.flags)) {
 			fprintf(stdout,"\n[+] Running test\n");
@@ -1067,7 +990,7 @@ int main (int argc, char **argv) {
 			}
 			
 			if (i <= repeat) {
-				if ((err = prepare_by_list(&defs)) == -1) {
+				if ((err = prepare_by_tree(&defs)) == -1) {
 					break;
 				}
 			}
@@ -1077,7 +1000,7 @@ int main (int argc, char **argv) {
 		defs.record_size = rec.start + rec.step * i;
 	} 
 
-	free_list();
+	free_tree();
 
 	/* close device */
 	if (close(defs.fd) == -1) {

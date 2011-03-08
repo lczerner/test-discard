@@ -1,16 +1,19 @@
-CFLAGS=-std=c99 -Wall -pedantic -D_GNU_SOURCE
+CFLAGS=-Wall -D_GNU_SOURCE
 
 PROGRAM=test-discard
 SRC=test-discard.c
 PROGRAM_PROFILE=test-discard.profile
 
-ALL: $(PROGRAM)
+LIB_DIR=libs
+LIB_OBJS=$(LIB_DIR)/rbtree.o
+
+ALL: $(LIB_OBJS) $(PROGRAM)
 
 $(PROGRAM): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o $@
+	$(CC) $(CFLAGS) $(SRC) $(LIB_OBJS) -g -o $@
 
-profile:
-	$(CC) $(CFLAGS) $(SRC) -pg -o $(PROGRAM_PROFILE)
+profile: $(LIB_OBJS)
+	$(CC) $(CFLAGS) $(SRC) $(LIB_OBJS) -pg -o $(PROGRAM_PROFILE)
 
 archive: tar bzip
 
@@ -22,4 +25,4 @@ bzip:
 
 
 clean:
-	rm -rf *.o $(PROGRAM) $(PROGRAM_PROFILE) *.dat *.ps *.pdf
+	rm -rf $(LIB_DIR)/*.o *.o $(PROGRAM) $(PROGRAM_PROFILE) *.dat *.ps *.pdf
